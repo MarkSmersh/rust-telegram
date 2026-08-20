@@ -1,62 +1,39 @@
 // longpoll, receive updates, do echo with ms
 
+pub mod models;
 pub mod types;
 
-use std::{pin::Pin, sync::Arc};
+use std::sync::Arc;
 
 use reqwest::Error;
 use serde::{Serialize, de::DeserializeOwned};
+use tokio::sync::mpsc;
 
-type Handler<Ctx, Args> = dyn Fn(Arc<Ctx>, Args) -> BoxFuture + Sync + Send;
-type BoxFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+use crate::telegram::{
+    models::{MessageModel, Model, UpdateModel, UpdatesModel, UserModel},
+    types::SendMessage,
+};
 
-struct CtxFn<Ctx, Args> {
-    ctx: Arc<Ctx>,
-    f: Arc<Handler<Ctx, Args>>,
-}
+type TgError<T> = Result<T, Error>;
 
-impl<Ctx, Args> Clone for CtxFn<Ctx, Args> {
-    fn clone(&self) -> Self {
-        Self {
-            ctx: Arc::clone(&self.ctx),
-            f: Arc::clone(&self.f),
-        }
-    }
-}
-
-impl<Ctx, Args> CtxFn<Ctx, Args> {
-    fn new<F>(ctx: Ctx, f: F) -> Self
-    where
-        F: Fn(Arc<Ctx>, Args) -> BoxFuture + 'static + Sync + Send,
-    {
-        Self {
-            ctx: Arc::new(ctx),
-            f: Arc::new(f),
-        }
-    }
-
-    async fn exec(&mut self, args: Args) {
-        let fut = (self.f)(self.ctx.clone(), args);
-        tokio::spawn(fut);
-    }
-}
-
-pub struct Client<Ctx> {
+#[derive(Clone)]
+pub struct Client {
     token: String,
     http: reqwest::Client,
-    messages_listeners: Vec<CtxFn<Ctx, types::Message>>,
+
+    message_senders: Vec<mpsc::Sender<MessageModel>>,
 }
 
-impl<Ctx> Client<Ctx> {
+impl Client {
     pub fn new(token: String) -> Self {
         Self {
             token,
             http: reqwest::Client::new(),
-            messages_listeners: Vec::new(),
+            message_senders: Vec::new(),
         }
     }
 
-    pub async fn start(&self, fun: fn(u: types::User)) {
+    pub async fn start(&self, fun: fn(u: UserModel)) {
         let res = self.get_me().await.expect("Unable to start the bot");
 
         fun(res);
@@ -64,14 +41,12 @@ impl<Ctx> Client<Ctx> {
         self.longpoll().await;
     }
 
-    pub async fn request<P, R>(&self, method: &str, params: P) -> Result<R, Error>
+    pub async fn request<P, R>(&self, method: &str, params: P) -> TgError<Model<R>>
     where
         P: Serialize,
         R: DeserializeOwned,
     {
         let url = format!("https://api.telegram.org/bot{}/{}", self.token, method);
-
-        println!("{}", url);
 
         let res = self.http.post(url).json(&params).send().await?;
 
@@ -85,55 +60,53 @@ impl<Ctx> Client<Ctx> {
             )
         }
 
-        Result::Ok(data.result.unwrap())
+        let m = Model::new(Arc::new((*self).clone()), data.result.unwrap());
+
+        Result::Ok(m)
     }
 
-    pub async fn get_me(&self) -> Result<types::User, Error> {
+    pub async fn get_me(&self) -> Result<UserModel, Error> {
         self.request("getMe", types::GetMe {}).await
     }
 
-    pub async fn send_message(&self, params: types::SendMessage) -> Result<types::User, Error> {
+    pub async fn send_message(&self, params: SendMessage) -> TgError<MessageModel> {
         self.request("sendMessage", params).await
     }
 
-    pub async fn get_updates(
-        &self,
-        params: types::GetUpdates,
-    ) -> Result<Vec<types::Update>, Error> {
-        let res = self.request("getUpdates", params).await;
-
-        res
+    pub async fn get_updates(&self, params: types::GetUpdates) -> TgError<UpdatesModel> {
+        self.request("getUpdates", params).await
     }
 
-    pub fn add_listener<F>(&mut self, ctx: Ctx, callback: F)
-    where
-        Ctx: Sized,
-        F: Fn(Arc<Ctx>, types::Message) -> BoxFuture + Sync + Send + 'static,
-    {
-        self.messages_listeners.push(CtxFn::new::<F>(ctx, callback));
+    fn channel<T>(&self) -> (mpsc::Sender<T>, mpsc::Receiver<T>) {
+        mpsc::channel::<T>(100)
     }
 
-    pub async fn longpoll(&self) {
+    pub fn message_channel(&mut self) -> mpsc::Receiver<MessageModel> {
+        let (tx, rx) = self.channel();
+        self.message_senders.push(tx);
+        rx
+    }
+
+    async fn longpoll(&self) {
         let mut offst = 0;
 
         loop {
-            let updates = self
+            let updates: Vec<UpdateModel> = self
                 .get_updates(types::GetUpdates {
                     offset: Some(offst),
                     timeout: Some(69),
                     ..types::GetUpdates::default()
                 })
                 .await
-                .expect("Unable to receive an update!");
+                .expect("Unable to receive an update!")
+                .into();
 
-            for ctx_fn in self.messages_listeners.clone().iter_mut() {
-                for u in updates.iter().clone() {
+            for sender in self.message_senders.clone() {
+                for u in updates.iter() {
                     if u.message.is_some() {
-                        // fun.clone()(u.message.clone().unwrap());
-                        // let mut f: Box<dyn Fn(types::Message)> = *fun;
-                        // (*fun)(u.message.clone().unwrap());
-                        //
-                        ctx_fn.exec(u.message.clone().unwrap()).await;
+                        // ahh billion copies of the client...
+                        let c = Arc::new((*self).clone());
+                        let _ = sender.send(Model::new(c, u.message.clone().unwrap())).await;
                     }
                 }
             }
