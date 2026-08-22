@@ -1,3 +1,5 @@
+use std::{error::Error, str::FromStr};
+
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 
@@ -240,6 +242,36 @@ pub struct GetUpdates {
     pub allowed_updates: Option<Vec<String>>,
 }
 
+#[derive(Serialize, Debug, Clone)]
+pub enum ParseMode {
+    HTML,
+    Markdown,
+    MarkdownV2,
+}
+
+impl ToString for ParseMode {
+    fn to_string(&self) -> String {
+        match self {
+            Self::HTML => "HTML".to_string(),
+            Self::Markdown => "Markdown".to_string(),
+            Self::MarkdownV2 => "MarkdownV2".to_string(),
+        }
+    }
+}
+
+impl FromStr for ParseMode {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "HTML" => Ok(Self::HTML),
+            "Markdown" => Ok(Self::Markdown),
+            "MarkdownV2" => Ok(Self::MarkdownV2),
+            &_ => Err("Unable to parse string to ParseMode"),
+        }
+    }
+}
+
 #[skip_serializing_none]
 #[derive(Debug, Serialize, Default)]
 pub struct SendMessage {
@@ -250,7 +282,7 @@ pub struct SendMessage {
     pub receiver_user_id: Option<i64>,
     pub callback_query_id: Option<String>,
     pub text: String,
-    pub parse_mode: Option<String>,
+    pub parse_mode: Option<ParseMode>,
     // pub entities: Option<Vec<MessageEntity>>,
     // pub link_preview_options: Option<LinkPreviewOptions>,
     pub disable_notification: Option<bool>,
@@ -260,4 +292,39 @@ pub struct SendMessage {
     // pub suggested_post_parameters: Option<SuggestedPostParameters>,
     // pub reply_parameters: Option<ReplyParameters>,
     // pub reply_markup: Option<ReplyMarkup>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Chat {
+    pub id: i64, // up to 52 bits → i64 is safe
+
+    #[serde(rename = "type")]
+    pub chat_type: ChatType,
+
+    pub title: Option<String>,
+    pub username: Option<String>,
+
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+
+    pub is_forum: Option<bool>,
+    pub is_direct_messages: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatType {
+    Private,
+    Group,
+    Supergroup,
+    Channel,
+}
+#[derive(Debug, Serialize, Default)]
+pub struct SendMessageDraft {
+    pub chat_id: i64,
+    pub message_thread_id: Option<i64>,
+    pub draft_id: i64, // must be non-zero
+    pub text: Option<String>,
+    pub parse_mode: Option<ParseMode>,
+    // pub entities: Option<Vec<MessageEntity>>,
 }

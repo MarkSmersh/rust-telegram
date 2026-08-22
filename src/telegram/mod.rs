@@ -10,11 +10,11 @@ use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::mpsc;
 
 use crate::telegram::{
-    models::{MessageModel, Model, UpdateModel, UpdatesModel, UserModel},
-    types::SendMessage,
+    models::{BoolModel, MessageModel, Model, UpdateModel, UpdatesModel, UserModel},
+    types::{ParseMode, SendMessage},
 };
 
-type TgError<T> = Result<T, Error>;
+type TgResult<T> = Result<T, Error>;
 
 #[derive(Clone)]
 pub struct Client {
@@ -22,6 +22,8 @@ pub struct Client {
     http: reqwest::Client,
 
     message_senders: Vec<mpsc::Sender<MessageModel>>,
+
+    parse_mode: ParseMode,
 }
 
 impl Client {
@@ -30,7 +32,12 @@ impl Client {
             token,
             http: reqwest::Client::new(),
             message_senders: Vec::new(),
+            parse_mode: ParseMode::HTML,
         }
+    }
+
+    pub fn set_parse_mode(&mut self, mode: ParseMode) {
+        self.parse_mode = mode;
     }
 
     pub async fn start(&self, fun: fn(u: UserModel)) {
@@ -41,7 +48,7 @@ impl Client {
         self.longpoll().await;
     }
 
-    pub async fn request<P, R>(&self, method: &str, params: P) -> TgError<Model<R>>
+    pub async fn request<P, R>(&self, method: &str, params: P) -> TgResult<Model<R>>
     where
         P: Serialize,
         R: DeserializeOwned,
@@ -57,24 +64,12 @@ impl Client {
                 "Telegram API error. Code: {}. {}",
                 data.error_code.unwrap(),
                 data.description.unwrap()
-            )
+            );
         }
 
         let m = Model::new(Arc::new((*self).clone()), data.result.unwrap());
 
         Result::Ok(m)
-    }
-
-    pub async fn get_me(&self) -> Result<UserModel, Error> {
-        self.request("getMe", types::GetMe {}).await
-    }
-
-    pub async fn send_message(&self, params: SendMessage) -> TgError<MessageModel> {
-        self.request("sendMessage", params).await
-    }
-
-    pub async fn get_updates(&self, params: types::GetUpdates) -> TgError<UpdatesModel> {
-        self.request("getUpdates", params).await
     }
 
     fn channel<T>(&self) -> (mpsc::Sender<T>, mpsc::Receiver<T>) {
@@ -116,5 +111,21 @@ impl Client {
                 Some(u) => offst = u.update_id + 1,
             }
         }
+    }
+
+    pub async fn get_me(&self) -> Result<UserModel, Error> {
+        self.request("getMe", types::GetMe {}).await
+    }
+
+    pub async fn send_message(&self, params: SendMessage) -> TgResult<MessageModel> {
+        self.request("sendMessage", params).await
+    }
+
+    pub async fn get_updates(&self, params: types::GetUpdates) -> TgResult<UpdatesModel> {
+        self.request("getUpdates", params).await
+    }
+
+    pub async fn send_message_draft(&self, params: types::SendMessageDraft) -> TgResult<BoolModel> {
+        self.request("sendMessageDraft", params).await
     }
 }

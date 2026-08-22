@@ -1,9 +1,21 @@
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
+use clap::Parser;
 use tokio::sync::RwLock;
 
-use crate::telegram::models::{MessageModel, UserModel};
+use crate::{
+    commands::{
+        Cli,
+        echo::echo,
+        ping::{self, ping},
+    },
+    telegram::{
+        models::UserModel,
+        types::ParseMode::{HTML, Markdown},
+    },
+};
 
+mod commands;
 mod telegram;
 
 mod ctx;
@@ -12,19 +24,34 @@ struct Bot {
     tg: Arc<RwLock<telegram::Client>>,
 }
 
-struct Ctx {
-    tg: Arc<RwLock<telegram::Client>>,
+type CtxTg = Arc<RwLock<telegram::Client>>;
+
+struct Ctx<Args: Sized> {
+    tg: CtxTg,
+    args: Args,
+}
+
+impl<Args> Ctx<Args> {
+    fn new(tg: CtxTg, args: Args) -> Self {
+        Self { args: args, tg: tg }
+    }
+}
+
+impl<Args> Deref for Ctx<Args> {
+    type Target = Args;
+
+    fn deref(&self) -> &Self::Target {
+        &self.args
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    Bot::new("8900721455:AAFDPsnCL_SOi6zHTj8lPV657biXZmdeZJg".to_string())
-        .init()
-        .await;
+    Bot::new("".to_string()).init().await;
 }
 
 fn on_start(u: UserModel) {
-    println!("{} has been started!", u.obj.first_name);
+    println!("{} has been started!", u.first_name);
 }
 
 impl Bot {
@@ -37,34 +64,43 @@ impl Bot {
     }
 
     async fn init(&self) {
-        for _ in 1..20 {
-            self.add_handler(async move |_, m| {
-                let _ = m.reply("hi".to_string()).await;
-            })
-            .await;
-        }
+        self.add_handler().await;
 
         self.tg.read().await.start(on_start).await;
     }
 
-    async fn add_handler<F, Fut>(&self, f: F)
-    where
-        F: Fn(Arc<Ctx>, MessageModel) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + Sync,
-    {
+    async fn add_handler(&self) {
         let mut rx = self.tg.write().await.message_channel();
-        let ctx = Arc::new(self.ctx());
+        let tg = self.tg.clone();
 
         tokio::spawn(async move {
             while let Some(m) = rx.recv().await {
-                f(ctx.clone(), m).await;
+                match m.text.clone().unwrap().as_str() {
+                    "/start" => {
+                        let _ = m.reply("dobry poczatek".to_string()).await;
+                    }
+                    &_ => {
+                        let c = Cli::try_parse_from(m.text.clone().unwrap().split_whitespace());
+
+                        if c.is_err() {
+                            let _ = m
+                                .set_parse_mode(Markdown)
+                                .reply(c.as_ref().err().unwrap().to_string())
+                                .await;
+                            continue;
+                        }
+
+                        match c.unwrap().command {
+                            commands::Commands::Echo(args) => {
+                                echo(Ctx::new(tg.clone(), args), m).await;
+                            }
+                            commands::Commands::Ping(args) => {
+                                ping(Ctx::new(tg.clone(), args), m).await;
+                            }
+                        }
+                    }
+                }
             }
         });
-    }
-
-    fn ctx(&self) -> Ctx {
-        Ctx {
-            tg: self.tg.clone(),
-        }
     }
 }
