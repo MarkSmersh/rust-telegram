@@ -1,53 +1,35 @@
-use std::{ops::Deref, sync::Arc};
+mod commands;
+mod ctx;
 
 use clap::Parser;
+use rust_telegram::{
+    telegram::{self, Client, models::UserModel, types::ParseMode::Markdown},
+    tools::Env,
+};
+use std::{error::Error, sync::Arc};
 use tokio::sync::RwLock;
 
 use crate::{
-    commands::{
-        Cli,
-        echo::echo,
-        ping::{self, ping},
-    },
-    telegram::{
-        models::UserModel,
-        types::ParseMode::{HTML, Markdown},
-    },
+    commands::{Cli, echo::echo, ping::ping},
+    ctx::Ctx,
 };
 
-mod commands;
-mod telegram;
-
-mod ctx;
-
 struct Bot {
-    tg: Arc<RwLock<telegram::Client>>,
-}
-
-type CtxTg = Arc<RwLock<telegram::Client>>;
-
-struct Ctx<Args: Sized> {
-    tg: CtxTg,
-    args: Args,
-}
-
-impl<Args> Ctx<Args> {
-    fn new(tg: CtxTg, args: Args) -> Self {
-        Self { args: args, tg: tg }
-    }
-}
-
-impl<Args> Deref for Ctx<Args> {
-    type Target = Args;
-
-    fn deref(&self) -> &Self::Target {
-        &self.args
-    }
+    tg: Arc<RwLock<Client>>,
 }
 
 #[tokio::main]
-async fn main() {
-    Bot::new("".to_string()).init().await;
+async fn main() -> Result<(), Box<dyn Error + 'static>> {
+    let env = Env::new()?;
+
+    let token = env.get("TEST_API");
+
+    if let None = token {
+        panic!("TEST_API enviroment variable is not provided.")
+    }
+
+    Bot::new(token.unwrap().to_owned()).init().await;
+    Ok(())
 }
 
 fn on_start(u: UserModel) {

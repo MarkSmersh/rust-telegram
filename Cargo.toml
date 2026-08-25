@@ -2,6 +2,7 @@
 name = "rust-telegram"
 version = "0.1.0"
 edition = "2024"
+default-run = "test"
 
 [dependencies]
 reqwest = { version = "0.12", features = ["json"] } # Enable JSON support
@@ -10,3 +11,7 @@ serde = { version = "1", features = ["derive"] }    # For parsing data into stru
 serde_with = "3.22.0"
 clap = { version = "4.6.6", features = ["derive"] }
 ping = "0.9.0"
+
+[[bin]]
+name = "test"
+path = "src/bin/test/main.rs"
