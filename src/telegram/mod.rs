@@ -3,18 +3,17 @@
 pub mod models;
 pub mod types;
 
-use std::sync::Arc;
+use std::{error::Error, ops::Deref, sync::Arc};
 
-use reqwest::Error;
 use serde::{Serialize, de::DeserializeOwned};
 use tokio::sync::mpsc;
 
 use crate::telegram::{
     models::{BoolModel, MessageModel, Model, UpdateModel, UpdatesModel, UserModel},
-    types::{ParseMode, SendMessage},
+    types::{ParseMode, SendMessage, Update},
 };
 
-type TgResult<T> = Result<T, Error>;
+type TgResult<T> = Result<T, Box<dyn Error>>;
 
 #[derive(Clone)]
 pub struct Client {
@@ -62,14 +61,26 @@ impl Client {
         if !data.ok {
             println!(
                 "Telegram API error. Code: {}. {}",
-                data.error_code.unwrap(),
-                data.description.unwrap()
+                match data.error_code {
+                    Some(v) => v,
+                    None => 0,
+                },
+                match data.description {
+                    Some(d) => d,
+                    None => "No description".to_owned(),
+                }
             );
         }
 
-        let m = Model::new(Arc::new((*self).clone()), data.result.unwrap());
+        let m = Model::new(
+            Arc::new((*self).clone()),
+            match data.result {
+                Some(r) => r,
+                None => return Result::Err("No result?")?,
+            },
+        );
 
-        Result::Ok(m)
+        Ok(m)
     }
 
     fn channel<T>(&self) -> (mpsc::Sender<T>, mpsc::Receiver<T>) {
@@ -86,22 +97,32 @@ impl Client {
         let mut offst = 0;
 
         loop {
-            let updates: Vec<UpdateModel> = self
+            let updates: Vec<UpdateModel> = match self
                 .get_updates(types::GetUpdates {
                     offset: Some(offst),
                     timeout: Some(69),
                     ..types::GetUpdates::default()
                 })
                 .await
-                .expect("Unable to receive an update!")
-                .into();
+            {
+                Ok(u) => u.into(),
+                Err(e) => {
+                    println!("{}", e.to_string());
+                    continue;
+                }
+            };
 
             for sender in self.message_senders.clone() {
                 for u in updates.iter() {
-                    if u.message.is_some() {
-                        // ahh billion copies of the client...
-                        let c = Arc::new((*self).clone());
-                        let _ = sender.send(Model::new(c, u.message.clone().unwrap())).await;
+                    match u.deref() {
+                        Update {
+                            message: Some(message),
+                            ..
+                        } => {
+                            let c = Arc::new((*self).clone());
+                            let _ = sender.send(Model::new(c, message.to_owned())).await;
+                        }
+                        _ => todo!("Other telegram updates (callback querym etc)"),
                     }
                 }
             }
@@ -113,7 +134,7 @@ impl Client {
         }
     }
 
-    pub async fn get_me(&self) -> Result<UserModel, Error> {
+    pub async fn get_me(&self) -> TgResult<UserModel> {
         self.request("getMe", types::GetMe {}).await
     }
 

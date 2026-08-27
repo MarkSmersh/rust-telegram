@@ -10,7 +10,12 @@ use std::{error::Error, sync::Arc};
 use tokio::sync::RwLock;
 
 use crate::{
-    commands::{Cli, echo::echo, ping::ping},
+    commands::{
+        Cli,
+        Commands::{Echo, Ping},
+        echo::echo,
+        ping::ping,
+    },
     ctx::Ctx,
 };
 
@@ -22,13 +27,13 @@ struct Bot {
 async fn main() -> Result<(), Box<dyn Error + 'static>> {
     let env = Env::new()?;
 
-    let token = env.get("TEST_API");
+    let token = env
+        .get("TEST_API")
+        .expect("TEST_API enviroment variable is not provided.")
+        .to_owned();
 
-    if let None = token {
-        panic!("TEST_API enviroment variable is not provided.")
-    }
+    Bot::new(token).init().await;
 
-    Bot::new(token.unwrap().to_owned()).init().await;
     Ok(())
 }
 
@@ -64,20 +69,17 @@ impl Bot {
                     &_ => {
                         let c = Cli::try_parse_from(m.text.clone().unwrap().split_whitespace());
 
-                        if c.is_err() {
-                            let _ = m
-                                .set_parse_mode(Markdown)
-                                .reply(c.as_ref().err().unwrap().to_string())
-                                .await;
-                            continue;
-                        }
-
-                        match c.unwrap().command {
-                            commands::Commands::Echo(args) => {
-                                echo(Ctx::new(tg.clone(), args), m).await;
-                            }
-                            commands::Commands::Ping(args) => {
-                                ping(Ctx::new(tg.clone(), args), m).await;
+                        match c {
+                            Ok(c) => match c.command {
+                                Echo(args) => {
+                                    echo(Ctx::new(tg.clone(), args), m).await;
+                                }
+                                Ping(args) => {
+                                    ping(Ctx::new(tg.clone(), args), m).await;
+                                }
+                            },
+                            Err(e) => {
+                                let _ = m.set_parse_mode(Markdown).reply(e.to_string()).await;
                             }
                         }
                     }

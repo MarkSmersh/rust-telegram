@@ -1,4 +1,4 @@
-use std::{error::Error, str::FromStr};
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
