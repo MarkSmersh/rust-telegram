@@ -12,13 +12,24 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Eq, PartialEq)]
 pub enum Commands {
     Echo(EchoArgs),
     Ping(PingArgs),
 }
 
-#[derive(Args, Debug)]
+// impl TryInto<EchoArgs> for Commands {
+//     type Error = Box<dyn Error>;
+//
+//     fn try_into(self) -> Result<EchoArgs, Self::Error> {
+//         match self {
+//             Self::Echo(args) => Ok(args),
+//             _ => Err("")?,
+//         }
+//     }
+// }
+
+#[derive(Args, Debug, PartialEq, Eq)]
 pub struct EchoArgs {
     #[arg(short, long)]
     pub bold: bool,
@@ -32,5 +43,5 @@ pub struct EchoArgs {
     pub string: String,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, PartialEq, Eq)]
 pub struct PingArgs {}

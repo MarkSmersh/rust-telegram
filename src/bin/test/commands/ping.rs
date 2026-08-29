@@ -12,7 +12,7 @@ pub async fn ping(_: Ctx<PingArgs>, mut m: MessageModel) {
 
     let i = Instant::now();
 
-    let mut text = "Ping".to_string();
+    let mut text = "Ping".to_owned();
 
     m = m.set_text(text.to_owned());
 

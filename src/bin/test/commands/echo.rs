@@ -1,7 +1,7 @@
 use crate::{Ctx, commands::EchoArgs, telegram::models::MessageModel};
 
 pub async fn echo(ctx: Ctx<EchoArgs>, m: MessageModel) {
-    let mut string = ctx.string.clone();
+    let mut string = ctx.string.to_owned();
 
     if ctx.uppercase {
         string = string.to_uppercase();
